@@ -1,0 +1,56 @@
+name: Build
+
+# Every push/PR builds NapMode.vmz as a workflow artifact.
+# Pushing a tag vX.Y.Z (matching version= in src/mod.txt) also publishes a GitHub Release with it.
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from mod.txt
+        id: version
+        run: |
+          version=$(sed -n 's/^version="\(.*\)"\r\?$/\1/p' src/mod.txt)
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if ! [[ "$version" =~ $semver ]]; then
+            echo "::error file=src/mod.txt::version \"$version\" is not valid semver"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match mod.txt version $version (expected v$version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # mod.txt must be at the archive root; zip writes forward-slash paths
+      - name: Package NapMode.vmz
+        run: |
+          mkdir -p dist
+          (cd src && zip -r -X ../dist/NapMode.vmz mod.txt NapMode)
+          unzip -l dist/NapMode.vmz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NapMode-${{ steps.version.outputs.version }}
+          path: dist/NapMode.vmz
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          flags=(--title "Nap Mode v$VERSION" --generate-notes)
+          [[ "$VERSION" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/NapMode.vmz "${flags[@]}"

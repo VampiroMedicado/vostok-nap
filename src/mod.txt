@@ -1,0 +1,8 @@
+[mod]
+name="Nap Mode"
+id="nap-mode"
+version="1.0.0"
+priority=0
+
+[autoload]
+NapModeMain="res://NapMode/Main.gd"
